@@ -1,0 +1,3 @@
+# One transaction per intent; expiry judged by chain time
+
+A Payment Intent is settled by exactly one transaction — a transfer carrying the reference that fails amount/mint validation lands the intent in terminal `mismatched`, never partially-paid (BTCPay-style multi-tx settle was rejected for v1: partial-payment + expiry races are a large correctness surface for a niche flow). Expiry is judged against the settling transaction's block time, never catraca's wall clock — otherwise payment outcomes would depend on the watcher's uptime. Consequences: a `detected` intent is never expired while its transfer is in flight, and after a crash the watcher must re-scan the chain past the deadline before it may emit `expired`.
