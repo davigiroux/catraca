@@ -187,16 +187,19 @@ UPDATE payment_intents SET state = ? WHERE id = ? AND state = ?`,
 }
 
 // ListByState returns all intents currently in the given state.
-func (s *Store) ListByState(ctx context.Context, state State) ([]Intent, error) {
+func (s *Store) ListByState(ctx context.Context, state State) (intents []Intent, err error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, merchant_id, recipient, amount, mint, reference, deadline, state, created_at
 FROM payment_intents WHERE state = ?`, string(state))
 	if err != nil {
 		return nil, fmt.Errorf("store: list by state: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
 
-	var intents []Intent
 	for rows.Next() {
 		var (
 			intent   Intent
