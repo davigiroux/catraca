@@ -4,7 +4,10 @@
 // docs/adr/0001-finalized-by-default.md.
 package watch
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Commitment mirrors Solana RPC commitment levels, ordered from least to
 // most final. Comparison with < / > reflects finality ordering (Processed <
@@ -49,6 +52,12 @@ type Transaction struct {
 	// Mint is the SPL token mint transferred, or empty for native SOL.
 	// Phase 0 only validates native SOL transfers (empty Mint).
 	Mint string
+	// BlockTime is the chain (block producer) time at which this
+	// transaction landed — never the watcher's wall clock. Per ADR 0002
+	// and CONTEXT.md's "Deadline" entry, this is what a transfer's
+	// eligibility is judged against, not when catraca happened to observe
+	// it.
+	BlockTime time.Time
 }
 
 // ChainReader is the production-shaped read interface the watcher needs
@@ -63,4 +72,11 @@ type ChainReader interface {
 	// GetCommitment returns the current commitment/finality status of the
 	// transaction identified by signature.
 	GetCommitment(ctx context.Context, signature string) (Commitment, error)
+	// CurrentBlockTime returns the chain's current block time — the same
+	// clock a transaction's BlockTime is drawn from. Expiry (ADR 0002)
+	// must be judged against this, never time.Now(): a watcher that was
+	// down for an hour must not treat that downtime as elapsed chain
+	// time, and a slow-to-finalize transaction that landed before the
+	// deadline must never be expired out from under it.
+	CurrentBlockTime(ctx context.Context) (time.Time, error)
 }
