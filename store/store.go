@@ -163,3 +163,60 @@ FROM payment_intents WHERE id = ?`, id)
 	intent.CreatedAt = time.Unix(created, 0).UTC()
 	return intent, nil
 }
+
+// UpdateState conditionally transitions an intent from `from` to `to`. It
+// returns ErrNotFound if no intent with that ID and current state exists
+// (already transitioned, or never existed) — callers should treat this as a
+// no-op, not an error condition to retry blindly.
+func (s *Store) UpdateState(ctx context.Context, id string, from, to State) error {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE payment_intents SET state = ? WHERE id = ? AND state = ?`,
+		string(to), id, string(from),
+	)
+	if err != nil {
+		return fmt.Errorf("store: update state: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: update state: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListByState returns all intents currently in the given state.
+func (s *Store) ListByState(ctx context.Context, state State) ([]Intent, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, merchant_id, recipient, amount, mint, reference, deadline, state, created_at
+FROM payment_intents WHERE state = ?`, string(state))
+	if err != nil {
+		return nil, fmt.Errorf("store: list by state: %w", err)
+	}
+	defer rows.Close()
+
+	var intents []Intent
+	for rows.Next() {
+		var (
+			intent   Intent
+			mint     sql.NullString
+			deadline int64
+			st       string
+			created  int64
+		)
+		if err := rows.Scan(&intent.ID, &intent.MerchantID, &intent.Recipient, &intent.Amount,
+			&mint, &intent.Reference, &deadline, &st, &created); err != nil {
+			return nil, fmt.Errorf("store: list by state: %w", err)
+		}
+		intent.Mint = mint.String
+		intent.Deadline = time.Unix(deadline, 0).UTC()
+		intent.State = State(st)
+		intent.CreatedAt = time.Unix(created, 0).UTC()
+		intents = append(intents, intent)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list by state: %w", err)
+	}
+	return intents, nil
+}
