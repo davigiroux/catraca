@@ -13,12 +13,16 @@ import (
 type fakeChain struct {
 	byReference map[string][]Transaction
 	commitments map[string]Commitment
+	// now is the fake chain's current block time. Tests advance it
+	// directly (never via time.Now()) to simulate chain time passing.
+	now time.Time
 }
 
 func newFakeChain() *fakeChain {
 	return &fakeChain{
 		byReference: map[string][]Transaction{},
 		commitments: map[string]Commitment{},
+		now:         time.Now(),
 	}
 }
 
@@ -28,6 +32,10 @@ func (f *fakeChain) FindTransactionsByReference(ctx context.Context, reference s
 
 func (f *fakeChain) GetCommitment(ctx context.Context, signature string) (Commitment, error) {
 	return f.commitments[signature], nil
+}
+
+func (f *fakeChain) CurrentBlockTime(ctx context.Context) (time.Time, error) {
+	return f.now, nil
 }
 
 type fakeMerchants struct {

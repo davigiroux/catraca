@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"sync"
+	"time"
 
 	solana "github.com/gagliardetto/solana-go"
 
@@ -56,6 +57,7 @@ func (c *svmChain) SendTransferWithReference(
 		Recipient: recipient.String(),
 		Lamports:  lamports,
 		Mint:      "", // native SOL
+		BlockTime: time.Unix(c.h.Clock().UnixTimestamp, 0).UTC(),
 	}
 
 	c.mu.Lock()
@@ -84,4 +86,11 @@ func (c *svmChain) GetCommitment(ctx context.Context, signature string) (Commitm
 		return CommitmentFinalized, nil
 	}
 	return CommitmentConfirmed, nil
+}
+
+// CurrentBlockTime returns the harness's simulated chain clock, the same
+// clock landed transactions' BlockTime is drawn from — never wall-clock
+// time (ADR 0002).
+func (c *svmChain) CurrentBlockTime(ctx context.Context) (time.Time, error) {
+	return time.Unix(c.h.Clock().UnixTimestamp, 0).UTC(), nil
 }
