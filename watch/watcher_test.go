@@ -194,7 +194,7 @@ func TestScanDetected_MerchantOptedDownToConfirmed(t *testing.T) {
 	}
 }
 
-func TestScanDetected_AmountMismatchStaysDetected(t *testing.T) {
+func TestScanDetected_AmountMismatchTransitionsToMismatched(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	intent := mustCreateIntent(t, s, store.NewIntentParams{Amount: "1.5", Reference: "ref-1"})
@@ -216,12 +216,12 @@ func TestScanDetected_AmountMismatchStaysDetected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetIntent: %v", err)
 	}
-	if got.State != store.StateDetected {
-		t.Fatalf("expected to remain Detected on amount mismatch (Mismatched is #8), got %q", got.State)
+	if got.State != store.StateMismatched {
+		t.Fatalf("expected Mismatched on amount mismatch, got %q", got.State)
 	}
 }
 
-func TestScanDetected_MintMismatchStaysDetected(t *testing.T) {
+func TestScanDetected_MintMismatchTransitionsToMismatched(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	intent := mustCreateIntent(t, s, store.NewIntentParams{Amount: "1.5", Reference: "ref-1"}) // native SOL intent
@@ -245,7 +245,88 @@ func TestScanDetected_MintMismatchStaysDetected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetIntent: %v", err)
 	}
+	if got.State != store.StateMismatched {
+		t.Fatalf("expected Mismatched on mint mismatch, got %q", got.State)
+	}
+}
+
+func TestScanDetected_MismatchWaitsForRequiredCommitment(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	intent := mustCreateIntent(t, s, store.NewIntentParams{Amount: "1.5", Reference: "ref-1"})
+	if err := s.UpdateState(ctx, intent.ID, store.StatePending, store.StateDetected); err != nil {
+		t.Fatalf("UpdateState: %v", err)
+	}
+
+	chain := newFakeChain()
+	// Wrong amount, but not finalized yet — must not jump to Mismatched early.
+	chain.byReference["ref-1"] = []Transaction{{Signature: "sig-1", Recipient: intent.Recipient, Lamports: 1_000_000_000}}
+	chain.commitments["sig-1"] = CommitmentConfirmed
+
+	w := &Watcher{Store: s, Chain: chain, DefaultCommitment: CommitmentFinalized}
+	if err := w.ScanDetected(ctx); err != nil {
+		t.Fatalf("ScanDetected: %v", err)
+	}
+
+	got, err := s.GetIntent(ctx, intent.ID)
+	if err != nil {
+		t.Fatalf("GetIntent: %v", err)
+	}
 	if got.State != store.StateDetected {
-		t.Fatalf("expected to remain Detected on mint mismatch, got %q", got.State)
+		t.Fatalf("expected still Detected (not final), got %q", got.State)
+	}
+}
+
+func TestScanDetected_OneLamportOverTransitionsToMismatched(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	intent := mustCreateIntent(t, s, store.NewIntentParams{Amount: "1.5", Reference: "ref-1"})
+	if err := s.UpdateState(ctx, intent.ID, store.StatePending, store.StateDetected); err != nil {
+		t.Fatalf("UpdateState: %v", err)
+	}
+
+	chain := newFakeChain()
+	// 1.5 SOL == 1_500_000_000 lamports; one over.
+	chain.byReference["ref-1"] = []Transaction{{Signature: "sig-1", Recipient: intent.Recipient, Lamports: 1_500_000_001}}
+	chain.commitments["sig-1"] = CommitmentFinalized
+
+	w := &Watcher{Store: s, Chain: chain, DefaultCommitment: CommitmentFinalized}
+	if err := w.ScanDetected(ctx); err != nil {
+		t.Fatalf("ScanDetected: %v", err)
+	}
+
+	got, err := s.GetIntent(ctx, intent.ID)
+	if err != nil {
+		t.Fatalf("GetIntent: %v", err)
+	}
+	if got.State != store.StateMismatched {
+		t.Fatalf("expected Mismatched for 1 lamport over, got %q", got.State)
+	}
+}
+
+func TestScanDetected_OneLamportUnderTransitionsToMismatched(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	intent := mustCreateIntent(t, s, store.NewIntentParams{Amount: "1.5", Reference: "ref-1"})
+	if err := s.UpdateState(ctx, intent.ID, store.StatePending, store.StateDetected); err != nil {
+		t.Fatalf("UpdateState: %v", err)
+	}
+
+	chain := newFakeChain()
+	// 1.5 SOL == 1_500_000_000 lamports; one under.
+	chain.byReference["ref-1"] = []Transaction{{Signature: "sig-1", Recipient: intent.Recipient, Lamports: 1_499_999_999}}
+	chain.commitments["sig-1"] = CommitmentFinalized
+
+	w := &Watcher{Store: s, Chain: chain, DefaultCommitment: CommitmentFinalized}
+	if err := w.ScanDetected(ctx); err != nil {
+		t.Fatalf("ScanDetected: %v", err)
+	}
+
+	got, err := s.GetIntent(ctx, intent.ID)
+	if err != nil {
+		t.Fatalf("GetIntent: %v", err)
+	}
+	if got.State != store.StateMismatched {
+		t.Fatalf("expected Mismatched for 1 lamport under, got %q", got.State)
 	}
 }

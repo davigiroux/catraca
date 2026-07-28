@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -37,6 +38,29 @@ func newTestHandler(t *testing.T) (http.Handler, Merchants) {
 	}}
 
 	return NewHandler(s, merchants), merchants
+}
+
+func newTestHandlerWithStore(t *testing.T) (http.Handler, *store.Store) {
+	t.Helper()
+	s, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("store.Close: %v", err)
+		}
+	})
+
+	merchants := Merchants{byAPIKey: map[string]Merchant{
+		"sk_acme": {
+			ID:        "acme",
+			APIKey:    "sk_acme",
+			Recipient: "mvines9iiHiQTysrwkJjGf2gb9Ex9jXJX8ns3qwf2kN",
+		},
+	}}
+
+	return NewHandler(s, merchants), s
 }
 
 func doRequest(t *testing.T, h http.Handler, method, path, apiKey string, body any) *httptest.ResponseRecorder {
@@ -151,6 +175,41 @@ func TestGetPayments_UnknownID_Returns404(t *testing.T) {
 	rec := doRequest(t, h, http.MethodGet, "/payments/does-not-exist", "sk_acme", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetPayments_SurfacesMismatchedState(t *testing.T) {
+	h, s := newTestHandlerWithStore(t)
+	deadline := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+
+	createRec := doRequest(t, h, http.MethodPost, "/payments", "sk_acme", map[string]any{
+		"amount":   "1",
+		"deadline": deadline.Format(time.RFC3339),
+	})
+	var created paymentIntentResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal create response: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := s.UpdateState(ctx, created.ID, store.StatePending, store.StateDetected); err != nil {
+		t.Fatalf("UpdateState to Detected: %v", err)
+	}
+	if err := s.UpdateState(ctx, created.ID, store.StateDetected, store.StateMismatched); err != nil {
+		t.Fatalf("UpdateState to Mismatched: %v", err)
+	}
+
+	getRec := doRequest(t, h, http.MethodGet, "/payments/"+created.ID, "sk_acme", nil)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+
+	var fetched paymentIntentResponse
+	if err := json.Unmarshal(getRec.Body.Bytes(), &fetched); err != nil {
+		t.Fatalf("unmarshal get response: %v", err)
+	}
+	if fetched.State != "mismatched" {
+		t.Fatalf("expected state mismatched, got %q", fetched.State)
 	}
 }
 

@@ -71,10 +71,9 @@ func (w *Watcher) ScanPending(ctx context.Context) error {
 
 // ScanDetected checks each Detected intent's landed transaction against the
 // merchant's required commitment level and against the intent's expected
-// amount/mint. Intents that pass both checks transition to Confirmed.
-//
-// Amount mismatches are left in Detected rather than transitioned to a
-// Mismatched state — that state and its handling is ticket #8.
+// amount/mint. Intents that pass both checks transition to Confirmed; a
+// finalized-enough transfer that fails amount or mint validation transitions
+// to Mismatched (terminal, per CONTEXT.md).
 func (w *Watcher) ScanDetected(ctx context.Context) error {
 	intents, err := w.Store.ListByState(ctx, store.StateDetected)
 	if err != nil {
@@ -113,7 +112,12 @@ func (w *Watcher) scanOneDetected(ctx context.Context, intent store.Intent) erro
 	// Phase 0 is SOL-only: both the intent and the landed transfer must be
 	// native SOL (empty mint).
 	if intent.Mint != "" || tx.Mint != "" {
-		// TODO(#8): SPL/mint mismatches should transition to Mismatched.
+		if err := w.Store.UpdateState(ctx, intent.ID, store.StateDetected, store.StateMismatched); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil
+			}
+			return fmt.Errorf("watch: scan detected: intent %s: %w", intent.ID, err)
+		}
 		return nil
 	}
 
@@ -122,8 +126,12 @@ func (w *Watcher) scanOneDetected(ctx context.Context, intent store.Intent) erro
 		return fmt.Errorf("watch: scan detected: intent %s: %w", intent.ID, err)
 	}
 	if tx.Lamports != wantLamports {
-		// TODO(#8): amount mismatches should transition to Mismatched
-		// rather than being silently left in Detected.
+		if err := w.Store.UpdateState(ctx, intent.ID, store.StateDetected, store.StateMismatched); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil
+			}
+			return fmt.Errorf("watch: scan detected: intent %s: %w", intent.ID, err)
+		}
 		return nil
 	}
 
