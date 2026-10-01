@@ -1,6 +1,6 @@
 # catraca
 
-Self-hosted Solana payments backend: a merchant creates a payment request, solgate watches the chain for the matching transfer, and fires a signed webhook when it's confirmed. Request + detect + notify — never custody, signing, swaps, or fiat.
+Self-hosted Solana payments backend: a merchant creates a payment request, catraca watches the chain for the matching transfer, and fires a signed webhook when it's confirmed. Request + detect + notify — never custody, signing, swaps, or fiat.
 
 ## Language
 
@@ -13,7 +13,7 @@ The owner of payment intents within a deployment: holds an API key, a recipient 
 _Avoid_: tenant, account, user
 
 **Operator**:
-The person running a solgate deployment. May be the only Merchant (solo store) or manage many (SaaS platform).
+The person running a catraca deployment. May be the only Merchant (solo store) or manage many (SaaS platform).
 _Avoid_: admin, host
 
 **Reference**:
@@ -31,7 +31,7 @@ Intent state (terminal): the transfer is finalized and passed amount/mint valida
 _Avoid_: paid, settled, completed
 
 **Deadline**:
-The latest chain block time at which a settling transfer counts. Judged against the transfer's block time, never solgate's wall clock. Merchant-set per intent.
+The latest chain block time at which a settling transfer counts. Judged against the transfer's block time, never catraca's wall clock. Merchant-set per intent.
 _Avoid_: timeout, TTL, expiry window
 
 **Expired**:
